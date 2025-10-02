@@ -35,7 +35,7 @@ for fi = 1:numel(fwhm_levels)
             x = conv(x, kernel, 'same');
         end
         x = (x - mean(x)) / std(x);
-        W_samples(i) = sqrt(mean(diff(x).^2) / (4*log(2)));
+        W_samples(i) = sqrt(mean(diff(x).^2));
     end
     W_est = mean(W_samples);
 
@@ -47,6 +47,7 @@ for fi = 1:numel(fwhm_levels)
         % Empirical cluster counts & sizes
         counts    = zeros(n_iter,1);
         all_sizes = [];
+        clust_size = []
         for k = 1:n_iter
             x = randn(length,1);
             if FWHM > 0
@@ -58,59 +59,57 @@ for fi = 1:numel(fwhm_levels)
             end
             x = (x - mean(x)) / std(x);
             mask = x > uj;
-            cc   = bwconncomp(mask, 1);
+            cc   = bwconncomp(mask,4);
             counts(k) = cc.NumObjects;
-            for c = 1:cc.NumObjects
-                all_sizes(end+1) = numel(cc.PixelIdxList{c}); %#ok<SAGROW>
-            end
+            all_sizes = [all_sizes sum(x>uj)] ;
+            clust_size = [clust_size, mean(cellfun(@length,cc.PixelIdxList),"omitnan")];
         end
         EmpMeanCount = mean(counts);
         EmpMeanSize  = mean(all_sizes);
+        EmpClustSize = mean(clust_size,"omitnan");
 
         % Theoretical RFT predictions
         EN_vox   = S * (1 - spm_Ncdf(uj,0,1));                                        % E[N]
-        Em       = S * (2*pi)^(-(D+1)/2) * W_est^(-D) * uj^(D-1) * exp(-uj^2/2);      % E[m]
-        En_size  = EN_vox / Em;                                                      % E[n]
+        Em       =  S*W_est * (2*pi)^(-(D+1)/2) *  uj^(D-1) * exp(-uj^2/2);      % E[m]
+        En_size  = EN_vox/Em;                                                      % E[n]
 
         % Append to summary
-        summary(end+1,:) = {FWHM, uj, W_est, EmpMeanCount, EmpMeanSize, EN_vox, Em, En_size}; %#ok<SAGROW>
+        summary(end+1,:) = {FWHM, uj, W_est,EN_vox, EmpMeanSize,EmpMeanCount, Em, En_size,EmpClustSize}; %#ok<SAGROW>
 
-        figure('Visible','off');
-        histogram(counts, 'Normalization','count', ...
-                  'FaceColor',[0 0.4470 0.7410], 'EdgeColor','k');
-        hold on;
-        lambda = EmpMeanCount;
-        xvals  = 0:max(counts);
-        plot(xvals, poisspdf(xvals, lambda)*numel(counts), 'r--', 'LineWidth',1.5);
-        xlabel('Cluster Count');
-        ylabel('Frequency');
-        title(sprintf('Counts (FWHM=%g, Z=%.2f)', FWHM, uj));
-        legend('Empirical','Poisson fit');
-        saveas(gcf, fullfile(output_dir, sprintf('hist_count_FWHM%d_Z%.2f.png',FWHM,uj)));
-        close;
+%         figure('Visible','off');
+%         histogram(counts, 'Normalization','count', ...
+%                   'FaceColor',[0 0.4470 0.7410], 'EdgeColor','k');
+%         hold on;
+%         lambda = EmpMeanCount;
+%         xvals  = 0:max(counts);
+%         plot(xvals, poisspdf(xvals, lambda)*numel(counts), 'r--', 'LineWidth',1.5);
+%         xlabel('Cluster Count');
+%         ylabel('Frequency');
+%         title(sprintf('Counts (FWHM=%g, Z=%.2f)', FWHM, uj));
+%         legend('Empirical','Poisson fit');
+%         saveas(gcf, fullfile(output_dir, sprintf('hist_count_FWHM%d_Z%.2f.png',FWHM,uj)));
+%         close;
 
-        if ~isempty(all_sizes)
-            figure('Visible','off');
-            histogram(all_sizes, 'Normalization','pdf', ...
-                      'FaceColor',[0.8500 0.3250 0.0980], 'EdgeColor','k');
-            hold on;
-            pd = fitdist(all_sizes','Exponential');
-            xx = linspace(0, max(all_sizes), 200);
-            plot(xx, exppdf(xx, pd.mu), 'k--', 'LineWidth',1.5);
-            xlabel('Cluster Size (voxels)');
-            ylabel('Density');
-            title(sprintf('Sizes (FWHM=%g, Z=%.2f)', FWHM, uj));
-            legend('Empirical','Exponential fit');
-            saveas(gcf, fullfile(output_dir, sprintf('hist_size_FWHM%d_Z%.2f.png',FWHM,uj)));
-            close;
-        end
+%         if ~isempty(all_sizes)
+%             figure('Visible','off');
+%             histogram(all_sizes, 'Normalization','pdf', ...
+%                       'FaceColor',[0.8500 0.3250 0.0980], 'EdgeColor','k');
+%             hold on;
+%             pd = fitdist(all_sizes','Exponential');
+%             xx = linspace(0, max(all_sizes), 200);
+%             plot(xx, exppdf(xx, pd.mu), 'k--', 'LineWidth',1.5);
+%             xlabel('Cluster Size (voxels)');
+%             ylabel('Density');
+%             title(sprintf('Sizes (FWHM=%g, Z=%.2f)', FWHM, uj));
+%             legend('Empirical','Exponential fit');
+%             saveas(gcf, fullfile(output_dir, sprintf('hist_size_FWHM%d_Z%.2f.png',FWHM,uj)));
+%             close;
+%         end
     end
 end
 
 %% SAVE SUMMARY
 T = cell2table(summary, ...
-    'VariableNames', {'FWHM','Z','W_est','EmpMeanCount','EmpMeanSize','TheoEN','TheoEm','TheoEnSize'});
+    'VariableNames', {'FWHM','Z','W_est','Theo_vox','Emp_vox','Emp_clusters','Theo_clusters','Theo_cluster_size', 'Emp_cluster_size'});
 % Display & write CSV
 disp(T);
-writetable(T, fullfile(output_dir, 'summary_comparison.csv'));
-fprintf('Results saved to %s\n', fullfile(output_dir, 'summary_comparison.csv'));
